@@ -8,8 +8,27 @@
 const STORAGE_KEYS = {
   HABITS: 'habitflow_habits_v3',
   AGENDA: 'habitflow_agenda_v3',
-  FIRED_ALARMS: 'habitflow_fired_alarms_v3'
+  FIRED_ALARMS: 'habitflow_fired_alarms_v3',
+  AUTOSYNC: 'habitflow_autosync_v3'
 };
+
+const APPS_SCRIPT_BRIDGE_CODE = `function doPost(e) {
+  var data = JSON.parse(e.postData.contents);
+  var cal = CalendarApp.getDefaultCalendar();
+  var items = data.items || [data];
+  items.forEach(function(item) {
+    var p = item.dateKey.split('-');
+    var t = (item.time || '08:00').split(':');
+    var start = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]), Number(t[0]), Number(t[1]), 0);
+    var end = new Date(start.getTime() + 30 * 60000);
+    var ev = cal.createEvent('⏰ ' + item.title, start, end, {
+      description: 'Sincronizado automaticamente pelo HabitFlow Mobile'
+    });
+    ev.removeAllReminders();
+    ev.addPopupReminder(0);
+  });
+  return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
+}`;
 
 const MILESTONES = [7, 21, 30, 90];
 
@@ -30,7 +49,11 @@ let state = {
   hoursPeriod: 'all', // 'all' | 'morning' | 'afternoon' | 'night'
   pendingRelapseHabitId: null,
   activeRingingItem: null,
-  firedAlarms: {} // { "ag_id_2026-11-15_08:00": true }
+  firedAlarms: {}, // { "ag_id_2026-11-15_08:00": true }
+  autoSyncConfig: {
+    webhookUrl: '',
+    autoIcsFallback: false
+  }
 };
 
 // Web Audio API Alarm Synthesizer State
@@ -358,13 +381,67 @@ async function requestAlarmNotificationPermission() {
 }
 
 function updateAlarmPermissionBadge() {
-  const btn = document.getElementById('btnAlarmTogglePermission');
-  if (!btn) return;
-  if ('Notification' in window && Notification.permission === 'granted') {
-    btn.textContent = '🔔 Alarme & Push ON';
-  } else {
-    btn.textContent = '🔔 Alarme Ativo';
+  const btn = document.getElementById('btnOpenAutoSyncModal');
+  const stripText = document.getElementById('hoursSyncStatusText');
+  const hasWebhook = Boolean(state.autoSyncConfig && state.autoSyncConfig.webhookUrl);
+  const hasAutoIcs = Boolean(state.autoSyncConfig && state.autoSyncConfig.autoIcsFallback);
+
+  if (btn) {
+    if (hasWebhook) {
+      btn.textContent = '🔗 Auto-Sync: ON';
+      btn.classList.add('sync-connected');
+    } else if (hasAutoIcs) {
+      btn.textContent = '📲 Auto-Calendário: ON';
+      btn.classList.add('sync-connected');
+    } else {
+      btn.textContent = '🔗 Auto-Sync: OFF';
+      btn.classList.remove('sync-connected');
+    }
   }
+
+  if (stripText) {
+    if (hasWebhook) {
+      stripText.innerHTML = '✅ <strong>Auto-Sync Conectado:</strong> novos compromissos vão direto p/ sua Google Agenda!';
+    } else if (hasAutoIcs) {
+      stripText.innerHTML = '📲 <strong>Modo Automático:</strong> abrindo o Calendário automaticamente ao salvar.';
+    } else {
+      stripText.innerHTML = '🔗 Conecte <strong>1 única vez</strong> em <strong>Auto-Sync</strong> p/ sincronizar sempre.';
+    }
+  }
+}
+
+async function pushItemsToAutoSyncCalendar(items = []) {
+  if (!Array.isArray(items) || items.length === 0) return;
+
+  const webhookUrl = (state.autoSyncConfig?.webhookUrl || '').trim();
+  const autoIcs = Boolean(state.autoSyncConfig?.autoIcsFallback);
+
+  if (webhookUrl) {
+    try {
+      await fetch(webhookUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ items })
+      });
+      showToast(`✅ Sincronizado automaticamente com o Calendário do celular!`);
+    } catch (err) {
+      console.warn('Falha ao enviar para o webhook de Auto-Sync:', err);
+    }
+  } else if (autoIcs) {
+    const ics = generateIcsForItems(items);
+    downloadIcsFile(ics, `alarme-${items[0].time.replace(':', 'h')}.ics`);
+  }
+}
+
+function openAutoSyncModal() {
+  document.getElementById('autoSyncWebhookInput').value = state.autoSyncConfig?.webhookUrl || '';
+  document.getElementById('autoIcsFallbackCheck').checked = Boolean(state.autoSyncConfig?.autoIcsFallback);
+  document.getElementById('autoSyncModal').classList.remove('hidden');
+}
+
+function closeAutoSyncModal() {
+  document.getElementById('autoSyncModal').classList.add('hidden');
 }
 
 function triggerAlarmModal(item, isTest = false) {
@@ -620,6 +697,11 @@ function loadState() {
     const rawHabits = localStorage.getItem(STORAGE_KEYS.HABITS) || localStorage.getItem('habitflow_habits_v2');
     const rawAgenda = localStorage.getItem(STORAGE_KEYS.AGENDA) || localStorage.getItem('habitflow_agenda_v2');
     const rawFired = localStorage.getItem(STORAGE_KEYS.FIRED_ALARMS);
+    const rawAutoSync = localStorage.getItem(STORAGE_KEYS.AUTOSYNC);
+
+    if (rawAutoSync) {
+      state.autoSyncConfig = JSON.parse(rawAutoSync);
+    }
 
     if (!rawHabits && !rawAgenda) {
       createDemoData();
@@ -644,6 +726,7 @@ function saveState() {
   localStorage.setItem(STORAGE_KEYS.HABITS, JSON.stringify(state.habits));
   localStorage.setItem(STORAGE_KEYS.AGENDA, JSON.stringify(state.agenda));
   localStorage.setItem(STORAGE_KEYS.FIRED_ALARMS, JSON.stringify(state.firedAlarms));
+  localStorage.setItem(STORAGE_KEYS.AUTOSYNC, JSON.stringify(state.autoSyncConfig));
 }
 
 function syncAgendaWithHabits() {
@@ -807,7 +890,7 @@ function addAgendaItem({ dateKey, time, type, title, habitId, alarmEnabled = tru
     }
 
     const isDone = Array.isArray(habit.completedDates) && habit.completedDates.includes(targetDate);
-    state.agenda.push({
+    const newItem = {
       id: 'ag_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
       dateKey: targetDate,
       time,
@@ -816,12 +899,16 @@ function addAgendaItem({ dateKey, time, type, title, habitId, alarmEnabled = tru
       title: habit.name,
       completed: isDone,
       alarmEnabled: Boolean(alarmEnabled)
-    });
+    };
+    state.agenda.push(newItem);
 
     state.selectedDateKey = targetDate;
     saveState();
     renderAll();
     showToast(`Hábito "${habit.name}" agendado às ${time}${alarmEnabled ? ' com alarme 🔔' : ''}!`);
+    if (alarmEnabled) {
+      pushItemsToAutoSyncCalendar([newItem]);
+    }
     return true;
   } else {
     const clean = (title || '').trim();
@@ -830,7 +917,7 @@ function addAgendaItem({ dateKey, time, type, title, habitId, alarmEnabled = tru
       return false;
     }
 
-    state.agenda.push({
+    const newItem = {
       id: 'ag_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
       dateKey: targetDate,
       time,
@@ -839,12 +926,16 @@ function addAgendaItem({ dateKey, time, type, title, habitId, alarmEnabled = tru
       title: clean,
       completed: false,
       alarmEnabled: Boolean(alarmEnabled)
-    });
+    };
+    state.agenda.push(newItem);
 
     state.selectedDateKey = targetDate;
     saveState();
     renderAll();
     showToast(`Compromisso agendado para ${time}${alarmEnabled ? ' com alarme 🔔' : ''}!`);
+    if (alarmEnabled) {
+      pushItemsToAutoSyncCalendar([newItem]);
+    }
     return true;
   }
 }
@@ -1472,9 +1563,61 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Botões de Alarme e Permissão
-  document.getElementById('btnAlarmTogglePermission').addEventListener('click', requestAlarmNotificationPermission);
+  // Botões de Alarme, Auto-Sync e Permissão
+  document.getElementById('btnOpenAutoSyncModal').addEventListener('click', openAutoSyncModal);
+  document.getElementById('btnCloseAutoSyncModal').addEventListener('click', closeAutoSyncModal);
   document.getElementById('btnTestAlarm').addEventListener('click', triggerTestAlarm);
+
+  document.getElementById('btnCopyAppsScript').addEventListener('click', () => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(APPS_SCRIPT_BRIDGE_CODE).then(() => {
+        showToast('📋 Código copiado! Agora cole em script.google.com');
+      });
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = APPS_SCRIPT_BRIDGE_CODE;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast('📋 Código copiado! Agora cole em script.google.com');
+    }
+  });
+
+  document.getElementById('btnSaveAutoSync').addEventListener('click', () => {
+    requestAlarmNotificationPermission();
+    state.autoSyncConfig = {
+      webhookUrl: document.getElementById('autoSyncWebhookInput').value.trim(),
+      autoIcsFallback: document.getElementById('autoIcsFallbackCheck').checked
+    };
+    saveState();
+    updateAlarmPermissionBadge();
+    closeAutoSyncModal();
+    showToast('🔗 Conexão de Sincronização Automática salva!');
+  });
+
+  document.getElementById('btnSyncExistingNow').addEventListener('click', () => {
+    state.autoSyncConfig = {
+      webhookUrl: document.getElementById('autoSyncWebhookInput').value.trim(),
+      autoIcsFallback: document.getElementById('autoIcsFallbackCheck').checked
+    };
+    saveState();
+    updateAlarmPermissionBadge();
+
+    const pendingItems = state.agenda.filter(a => !a.completed);
+    if (pendingItems.length === 0) {
+      showToast('Nenhum compromisso pendente para enviar.');
+      return;
+    }
+    if (state.autoSyncConfig.webhookUrl) {
+      pushItemsToAutoSyncCalendar(pendingItems);
+      closeAutoSyncModal();
+    } else {
+      const ics = generateIcsForItems(pendingItems);
+      downloadIcsFile(ics, 'todos-compromissos-habitflow.ics');
+      closeAutoSyncModal();
+    }
+  });
 
   // Ações do Modal de Alarme Tocando
   document.getElementById('btnAlarmCompleteNow').addEventListener('click', () => {
@@ -1631,7 +1774,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.habits.unshift(newHabit);
 
       if (category === 'start' && suggestedTime && autoSchedule) {
-        state.agenda.push({
+        const autoItem = {
           id: 'ag_' + Date.now(),
           dateKey: getTodayKey(),
           time: suggestedTime,
@@ -1640,7 +1783,9 @@ document.addEventListener('DOMContentLoaded', () => {
           title: newHabit.name,
           completed: false,
           alarmEnabled: true
-        });
+        };
+        state.agenda.push(autoItem);
+        pushItemsToAutoSyncCalendar([autoItem]);
       }
 
       showToast(`Hábito "${name}" criado!`);

@@ -1616,6 +1616,7 @@ body {
 }
 
 input[type="text"],
+input[type="url"],
 input[type="date"],
 input[type="time"],
 input[type="datetime-local"],
@@ -1629,6 +1630,61 @@ select {
   padding: 10px 11px;
   border-radius: 10px;
   outline: none;
+}
+
+.sync-steps-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.sync-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.step-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.step-content {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.76rem;
+}
+
+.step-content strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+
+.step-content p {
+  color: var(--text-secondary);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.alarm-status-pill.sync-connected {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.45);
+  color: #34d399;
 }
 
 .alarm-checkbox-box {

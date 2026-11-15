@@ -51,8 +51,8 @@
       <div class="header-text-wrap">
         <div class="header-meta-row">
           <span class="header-date-pill" id="currentDateDisplay">Carregando...</span>
-          <button type="button" class="alarm-status-pill" id="btnAlarmTogglePermission" title="Configurar som e notificações do alarme">
-            🔔 Alarme Ativo
+          <button type="button" class="alarm-status-pill" id="btnOpenAutoSyncModal" title="Configurar Sincronização Automática com o Calendário do Celular">
+            🔗 Auto-Sync: OFF
           </button>
         </div>
         <h1 class="header-title" id="screenHeaderTitle">Meus Hábitos</h1>
@@ -225,9 +225,9 @@
 
         <!-- Alarm Quick Test & Status Bar inside Horários -->
         <div class="alarm-info-strip">
-          <span>⏰ Toque em <strong>🔔</strong> p/ alarme no app ou <strong>📲</strong> p/ alarme nativo do celular.</span>
+          <span id="hoursSyncStatusText">🔗 Conecte 1 vez para enviar todo novo compromisso direto ao Calendário do celular.</span>
           <div style="display:flex;gap:5px;flex-shrink:0;">
-            <button type="button" class="btn-test-inline" onclick="exportDayAlarmsToPhone()" title="Salvar alarmes do dia no Calendário/Alarme nativo do celular">📲 Sincronizar Celular</button>
+            <button type="button" class="btn-test-inline" onclick="openAutoSyncModal()">🔗 Auto-Sync</button>
             <button type="button" class="btn-test-inline" onclick="triggerTestAlarm()">🔊 Testar</button>
           </div>
         </div>
@@ -425,6 +425,65 @@
         <div class="sheet-actions">
           <button type="button" class="btn btn-secondary" id="btnCancelRelapse">Cancelar</button>
           <button type="button" class="btn btn-danger" id="btnConfirmRelapse">Zerar Contador</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- =========================================================
+         BOTTOM SHEET 4: SINCRONIZAÇÃO AUTOMÁTICA (CONECTAR 1 VEZ)
+         ========================================================= -->
+    <div class="sheet-backdrop hidden" id="autoSyncModal" role="dialog" aria-modal="true">
+      <div class="bottom-sheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-header">
+          <h3>🔗 Sincronização Automática</h3>
+          <button class="icon-btn" id="btnCloseAutoSyncModal" type="button" aria-label="Fechar">✕</button>
+        </div>
+
+        <p class="sheet-body-text" style="margin-bottom:12px;">
+          Conecte sua <strong>Google Agenda</strong> (que já vem sincronizada no Android e iPhone) <strong>apenas uma vez</strong>. Depois disso, todo compromisso criado aqui aparecerá sozinho no calendário do seu celular com alarme!
+        </p>
+
+        <!-- Passo a Passo Rápido -->
+        <div class="sync-steps-box">
+          <div class="sync-step">
+            <span class="step-num">1</span>
+            <div class="step-content">
+              <strong>Copie o conector automático</strong>
+              <p>Toque no botão abaixo para copiar o código de 15 linhas.</p>
+              <button type="button" class="btn-chip btn-chip-blue" id="btnCopyAppsScript" style="margin-top:5px;">
+                📋 Copiar Código do Conector
+              </button>
+            </div>
+          </div>
+
+          <div class="sync-step">
+            <span class="step-num">2</span>
+            <div class="step-content">
+              <strong>Cole em <a href="https://script.google.com/home/start" target="_blank" rel="noopener" style="color:#60a5fa;text-decoration:underline;">script.google.com</a></strong>
+              <p>Crie um "Novo projeto", cole o código, clique em <strong>Implantar → Nova implantação → App da Web</strong> (Acesso: <em>Qualquer pessoa</em>) e copie a URL gerada.</p>
+            </div>
+          </div>
+
+          <div class="sync-step">
+            <span class="step-num">3</span>
+            <div class="step-content">
+              <strong>Cole sua URL aqui (Salva para sempre)</strong>
+              <input type="url" id="autoSyncWebhookInput" placeholder="https://script.google.com/macros/s/.../exec" style="margin-top:6px;">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-field" style="margin-top:12px;">
+          <label class="checkbox-label alarm-checkbox-box">
+            <input type="checkbox" id="autoIcsFallbackCheck">
+            <span>📲 Se não usar URL: abrir confirmação do Calendário automaticamente ao salvar cada compromisso</span>
+          </label>
+        </div>
+
+        <div class="sheet-actions" style="margin-top:12px;">
+          <button type="button" class="btn btn-secondary" id="btnSyncExistingNow">🔄 Enviar Atuais</button>
+          <button type="button" class="btn btn-primary" id="btnSaveAutoSync">Salvar Conexão</button>
         </div>
       </div>
     </div>
