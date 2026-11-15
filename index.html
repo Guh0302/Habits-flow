@@ -225,8 +225,11 @@
 
         <!-- Alarm Quick Test & Status Bar inside Horários -->
         <div class="alarm-info-strip">
-          <span>⏰ Eventos com <strong>🔔</strong> tocam alarme sonoro no horário.</span>
-          <button type="button" class="btn-test-inline" onclick="triggerTestAlarm()">Testar Som</button>
+          <span>⏰ Toque em <strong>🔔</strong> p/ alarme no app ou <strong>📲</strong> p/ alarme nativo do celular.</span>
+          <div style="display:flex;gap:5px;flex-shrink:0;">
+            <button type="button" class="btn-test-inline" onclick="exportDayAlarmsToPhone()" title="Salvar alarmes do dia no Calendário/Alarme nativo do celular">📲 Sincronizar Celular</button>
+            <button type="button" class="btn-test-inline" onclick="triggerTestAlarm()">🔊 Testar</button>
+          </div>
         </div>
 
         <div class="period-tabs">

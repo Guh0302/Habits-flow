@@ -36,6 +36,7 @@ let state = {
 // Web Audio API Alarm Synthesizer State
 let audioCtx = null;
 let alarmIntervalId = null;
+let backgroundKeepAliveStarted = false;
 
 // ==========================================
 // UTILITÁRIOS DE DATA E HORA
@@ -171,6 +172,115 @@ function ensureAudioContext() {
   if (audioCtx && audioCtx.state === 'suspended') {
     audioCtx.resume().catch(() => {});
   }
+  startBackgroundKeepAlive();
+}
+
+/**
+ * Mantém um canal de áudio inaudível (gain = 0.00001) ativo para impedir
+ * que o Android/iOS congele o temporizador quando o usuário minimiza o app
+ * ou bloqueia a tela do celular.
+ */
+function startBackgroundKeepAlive() {
+  if (backgroundKeepAliveStarted || !audioCtx) return;
+  try {
+    const osc = audioCtx.createOscillator();
+    const silentGain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 40;
+    silentGain.gain.value = 0.00001; // Inaudível, apenas mantém a thread ativa em 2º plano
+    osc.connect(silentGain);
+    silentGain.connect(audioCtx.destination);
+    osc.start();
+    backgroundKeepAliveStarted = true;
+  } catch (e) {}
+}
+
+/**
+ * Exporta um compromisso ou todos os compromissos do dia para o
+ * Alarme/Calendário Nativo do Celular (.ics com VALARM sonoro no horário exato).
+ * Funciona 100% mesmo se o navegador estiver totalmente fechado!
+ */
+function generateIcsForItems(items) {
+  const pad = n => String(n).padStart(2, '0');
+  const formatIcsDateLocal = (dateKey, timeHHMM, addMinutes = 0) => {
+    const [y, m, d] = String(dateKey).split('-').map(Number);
+    const [hh, mm] = String(timeHHMM || '08:00').split(':').map(Number);
+    const dt = new Date(y, (m || 1) - 1, d || 1, hh || 8, (mm || 0) + addMinutes, 0);
+    return `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(dt.getMinutes())}00`;
+  };
+
+  const eventsBlocks = items.map(item => {
+    const dtStart = formatIcsDateLocal(item.dateKey, item.time, 0);
+    const dtEnd = formatIcsDateLocal(item.dateKey, item.time, 30);
+    const uid = `${item.id}_${item.dateKey}@habitflow.app`;
+    const cleanTitle = String(item.title || 'Compromisso').replace(/[\r\n,;]/g, ' ');
+    const desc = item.type === 'habit'
+      ? 'Hábito em construção (Modo Constância) - HabitFlow'
+      : 'Compromisso agendado no HabitFlow';
+
+    return [
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTAMP:${dtStart}`,
+      `DTSTART:${dtStart}`,
+      `DTEND:${dtEnd}`,
+      `SUMMARY:⏰ ${cleanTitle}`,
+      `DESCRIPTION:${desc}`,
+      'BEGIN:VALARM',
+      'TRIGGER:PT0S',
+      'ACTION:AUDIO',
+      'END:VALARM',
+      'BEGIN:VALARM',
+      'TRIGGER:PT0S',
+      'ACTION:DISPLAY',
+      `DESCRIPTION:Hora de: ${cleanTitle}`,
+      'END:VALARM',
+      'END:VEVENT'
+    ].join('\r\n');
+  });
+
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//HabitFlow Mobile//Alarme Nativo//PT-BR',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    ...eventsBlocks,
+    'END:VCALENDAR'
+  ].join('\r\n');
+}
+
+function downloadIcsFile(icsContent, filename = 'alarme-habitflow.ics') {
+  const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function exportSingleAlarmToPhone(itemId) {
+  const item = state.agenda.find(a => a.id === itemId);
+  if (!item) return;
+  const ics = generateIcsForItems([item]);
+  downloadIcsFile(ics, `alarme-${item.time.replace(':', 'h')}.ics`);
+  showToast(`📲 Abrindo Alarme/Calendário nativo do celular para "${item.title}"!`);
+}
+
+function exportDayAlarmsToPhone() {
+  const dayItems = state.agenda.filter(
+    a => a.dateKey === state.selectedDateKey && !a.completed
+  );
+  if (dayItems.length === 0) {
+    showToast('Adicione pelo menos 1 compromisso pendente neste dia para sincronizar.');
+    return;
+  }
+  const ics = generateIcsForItems(dayItems);
+  downloadIcsFile(ics, `alarmes-${state.selectedDateKey}.ics`);
+  showToast(`📲 Sincronizando ${dayItems.length} alarme(s) com o sistema do celular!`);
 }
 
 function playSingleAlarmChime() {
@@ -270,16 +380,30 @@ function triggerAlarmModal(item, isTest = false) {
   document.getElementById('alarmRingingModal').classList.remove('hidden');
   startAlarmSoundLoop();
 
-  // Disparar notificação nativa do sistema se permitido
+  // Disparar notificação persistente via Service Worker (funciona na tela de bloqueio / fora do app)
   if ('Notification' in window && Notification.permission === 'granted') {
-    try {
-      new Notification(`⏰ ${item.time} — ${item.title}`, {
-        body: item.type === 'habit'
-          ? 'Hora do seu hábito no HabitFlow!'
-          : 'Compromisso agendado no HabitFlow!',
-        tag: item.id || 'habitflow-alarm'
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'SHOW_ALARM_NOTIFICATION',
+        item
       });
-    } catch (e) {}
+    } else if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then(reg => {
+        if (reg.active) {
+          reg.active.postMessage({ type: 'SHOW_ALARM_NOTIFICATION', item });
+        }
+      }).catch(() => {});
+    } else {
+      try {
+        new Notification(`⏰ ${item.time} — ${item.title}`, {
+          body: item.type === 'habit'
+            ? 'Hora do seu hábito no HabitFlow!'
+            : 'Compromisso agendado no HabitFlow!',
+          tag: item.id || 'habitflow-alarm',
+          requireInteraction: true
+        });
+      } catch (e) {}
+    }
   }
 }
 
@@ -1024,9 +1148,17 @@ function renderHomeAgenda() {
           type="button"
           class="alarm-toggle-btn ${item.alarmEnabled !== false ? 'alarm-on' : ''}"
           onclick="toggleAgendaItemAlarm('${item.id}')"
-          title="${item.alarmEnabled !== false ? 'Alarme ativado (toque para silenciar)' : 'Alarme silenciado (toque para ativar)'}"
+          title="${item.alarmEnabled !== false ? 'Alarme interno ativado' : 'Alarme interno silenciado'}"
         >
-          ${item.alarmEnabled !== false ? '🔔 ON' : '🔕 OFF'}
+          ${item.alarmEnabled !== false ? '🔔' : '🔕'}
+        </button>
+        <button
+          type="button"
+          class="alarm-toggle-btn"
+          onclick="exportSingleAlarmToPhone('${item.id}')"
+          title="Salvar no Alarme/Calendário nativo do celular (toca mesmo com navegador fechado)"
+        >
+          📲
         </button>
         <button class="icon-btn" type="button" onclick="removeAgendaItem('${item.id}')" title="Remover">✕</button>
       </div>
@@ -1124,9 +1256,17 @@ function renderHomeHours() {
                 type="button"
                 class="alarm-toggle-btn ${item.alarmEnabled !== false ? 'alarm-on' : ''}"
                 onclick="toggleAgendaItemAlarm('${item.id}')"
-                title="Alternar alarme"
+                title="Alternar alarme no app"
               >
                 ${item.alarmEnabled !== false ? '🔔' : '🔕'}
+              </button>
+              <button
+                type="button"
+                class="alarm-toggle-btn"
+                onclick="exportSingleAlarmToPhone('${item.id}')"
+                title="Salvar no Alarme/Calendário nativo do celular"
+              >
+                📲
               </button>
               <button class="icon-btn" type="button" style="width:20px;height:20px;font-size:0.7rem;" onclick="removeAgendaItem('${item.id}')" title="Remover">✕</button>
             </div>
@@ -1284,6 +1424,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.addEventListener('message', event => {
+      const data = event.data || {};
+      if (data.type === 'NOTIFICATION_ACTION') {
+        stopAlarmSoundLoop();
+        document.getElementById('alarmRingingModal').classList.add('hidden');
+        state.activeRingingItem = null;
+
+        if (data.action === 'complete' && data.itemId) {
+          const item = state.agenda.find(a => a.id === data.itemId);
+          if (item && !item.completed) {
+            toggleAgendaItem(item.id);
+          }
+        } else if (data.action === 'snooze' && data.itemId) {
+          const item = state.agenda.find(a => a.id === data.itemId);
+          if (item) {
+            item.time = addMinutesToHHMM(getCurrentTimeHHMM(), 5);
+            item.alarmEnabled = true;
+            saveState();
+            renderAll();
+            showToast(`💤 Soneca ativada pela notificação (+5 min: ${item.time})`);
+          }
+        }
+      }
+    });
   }
 
   // Desbloquear Web Audio no primeiro toque do usuário na tela
