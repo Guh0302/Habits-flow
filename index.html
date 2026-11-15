@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="HabitFlow">
   <link rel="manifest" href="manifest.json">
-  <title>HabitFlow Mobile — Hábitos, Calendário & Horários</title>
+  <title>HabitFlow Mobile — Hábitos, Agenda & Horários com Alarme</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
@@ -19,13 +19,16 @@
   <div class="desktop-preview-bar">
     <div class="preview-bar-left">
       <span class="preview-dot"></span>
-      <span><strong>HabitFlow Mobile App</strong> — 4 Homes Independentes</span>
+      <span><strong>HabitFlow Mobile App</strong> — Hábitos (Sub-homes), Calendário & Alarmes</span>
     </div>
     <div class="preview-bar-actions">
-      <button class="preview-btn" id="btnToggleFrame" title="Alternar moldura de celular ou tela expandida">
+      <button class="preview-btn" id="btnTestAlarm" type="button" title="Disparar um alarme de teste agora">
+        🔔 Testar Alarme
+      </button>
+      <button class="preview-btn" id="btnToggleFrame" type="button" title="Alternar moldura de celular ou tela expandida">
         📱 Alternar Moldura
       </button>
-      <button class="preview-btn" id="btnResetDemo" title="Restaurar dados de demonstração">
+      <button class="preview-btn" id="btnResetDemo" type="button" title="Restaurar dados de demonstração">
         ↺ Restaurar Demo
       </button>
     </div>
@@ -43,11 +46,16 @@
       </div>
     </div>
 
-    <!-- Mobile App Top Header (Fixed formatting so date and + button never overflow) -->
+    <!-- Mobile App Top Header -->
     <header class="mobile-header">
       <div class="header-text-wrap">
-        <span class="header-date-pill" id="currentDateDisplay">Carregando...</span>
-        <h1 class="header-title" id="screenHeaderTitle">Hábitos para Começar</h1>
+        <div class="header-meta-row">
+          <span class="header-date-pill" id="currentDateDisplay">Carregando...</span>
+          <button type="button" class="alarm-status-pill" id="btnAlarmTogglePermission" title="Configurar som e notificações do alarme">
+            🔔 Alarme Ativo
+          </button>
+        </div>
+        <h1 class="header-title" id="screenHeaderTitle">Meus Hábitos</h1>
       </div>
       <button class="header-add-btn" id="btnQuickActionTop" type="button" aria-label="Adicionar">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6">
@@ -58,73 +66,89 @@
       </button>
     </header>
 
-    <!-- Scrollable App Viewport with 4 Separate Homes -->
+    <!-- Scrollable App Viewport with 3 Main Homes -->
     <main class="mobile-viewport" id="mobileViewport">
 
       <!-- =========================================================
-           HOME 1: HÁBITOS PARA COMEÇAR (Modo Constância)
+           HOME 1: HÁBITOS (Unificada com 2 Sub-Homes: Começar | Deixar)
            ========================================================= -->
-      <section class="app-screen active" id="screen-start" data-screen="start">
-        <div class="hero-card hero-start">
-          <div class="hero-top">
-            <div class="hero-info">
-              <span class="hero-tag">MODO CONSTÂNCIA</span>
-              <h2 id="startHeroStat">0 de 0 concluídos hoje</h2>
-              <p class="hero-sub">Faça o check-in diário para aumentar sua sequência</p>
+      <section class="app-screen active" id="screen-habits" data-screen="habits">
+
+        <!-- SUB-HOME SWITCHER (Segmented Control) -->
+        <div class="subhome-switcher" role="tablist" aria-label="Sub-abas de Hábitos">
+          <button type="button" class="subhome-tab active" data-subhome="start" role="tab" aria-selected="true">
+            <span class="subhome-icon">🔥</span>
+            <span>Para Começar</span>
+            <span class="subhome-count" id="subCountStart">0</span>
+          </button>
+          <button type="button" class="subhome-tab" data-subhome="stop" role="tab" aria-selected="false">
+            <span class="subhome-icon">🛡️</span>
+            <span>Para Deixar</span>
+            <span class="subhome-count subhome-count-stop" id="subCountStop">0</span>
+          </button>
+        </div>
+
+        <!-- SUB-HOME 1.A: HÁBITOS PARA COMEÇAR (Modo Constância) -->
+        <div class="subhome-pane active" id="subhome-start">
+          <div class="hero-card hero-start">
+            <div class="hero-top">
+              <div class="hero-info">
+                <span class="hero-tag">MODO CONSTÂNCIA</span>
+                <h2 id="startHeroStat">0 de 0 concluídos hoje</h2>
+                <p class="hero-sub">Faça o check-in diário para aumentar sua sequência</p>
+              </div>
+              <div class="hero-ring" id="startHeroPct">0%</div>
             </div>
-            <div class="hero-ring" id="startHeroPct">0%</div>
+            <div class="hero-progress-bar">
+              <div class="hero-progress-fill" id="startHeroFill" style="width: 0%"></div>
+            </div>
           </div>
-          <div class="hero-progress-bar">
-            <div class="hero-progress-fill" id="startHeroFill" style="width: 0%"></div>
+
+          <div class="section-bar">
+            <h3>Hábitos para Começar</h3>
+            <button class="btn-chip btn-chip-start" type="button" onclick="openNewHabitModal('start')">+ Começar Hábito</button>
           </div>
+
+          <div class="cards-stack" id="startHabitsList"></div>
         </div>
 
-        <div class="section-bar">
-          <h3>Meus Hábitos em Construção</h3>
-          <button class="btn-chip btn-chip-start" type="button" onclick="openNewHabitModal('start')">+ Hábito</button>
+        <!-- SUB-HOME 1.B: HÁBITOS PARA DEIXAR (Modo Abstinência) -->
+        <div class="subhome-pane" id="subhome-stop">
+          <div class="hero-card hero-stop">
+            <div class="hero-top">
+              <div class="hero-info">
+                <span class="hero-tag">MODO ABSTINÊNCIA</span>
+                <h2 id="stopHeroStat">0 hábitos monitorados</h2>
+                <p class="hero-sub">Contagem progressiva em tempo real baseada no relógio</p>
+              </div>
+              <div class="hero-badge-shield">🛡️</div>
+            </div>
+            <div class="hero-mini-metrics">
+              <div class="mini-metric">
+                <span>Maior Recorde Geral</span>
+                <strong id="stopBestOverall">0 dias</strong>
+              </div>
+              <div class="mini-metric">
+                <span>Atualização</span>
+                <strong>Automática (Live)</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-bar">
+            <h3>Hábitos para Deixar</h3>
+            <button class="btn-chip btn-chip-stop" type="button" onclick="openNewHabitModal('stop')">+ Deixar Hábito</button>
+          </div>
+
+          <div class="cards-stack" id="stopHabitsList"></div>
         </div>
 
-        <div class="cards-stack" id="startHabitsList"></div>
       </section>
 
       <!-- =========================================================
-           HOME 2: HÁBITOS PARA DEIXAR (Modo Abstinência)
-           ========================================================= -->
-      <section class="app-screen" id="screen-stop" data-screen="stop">
-        <div class="hero-card hero-stop">
-          <div class="hero-top">
-            <div class="hero-info">
-              <span class="hero-tag">MODO ABSTINÊNCIA</span>
-              <h2 id="stopHeroStat">0 hábitos monitorados</h2>
-              <p class="hero-sub">Contagem progressiva em tempo real baseada no relógio</p>
-            </div>
-            <div class="hero-badge-shield">🛡️</div>
-          </div>
-          <div class="hero-mini-metrics">
-            <div class="mini-metric">
-              <span>Maior Recorde Geral</span>
-              <strong id="stopBestOverall">0 dias</strong>
-            </div>
-            <div class="mini-metric">
-              <span>Atualização</span>
-              <strong>Automática (Live)</strong>
-            </div>
-          </div>
-        </div>
-
-        <div class="section-bar">
-          <h3>Contadores de Abstinência</h3>
-          <button class="btn-chip btn-chip-stop" type="button" onclick="openNewHabitModal('stop')">+ Parar Hábito</button>
-        </div>
-
-        <div class="cards-stack" id="stopHabitsList"></div>
-      </section>
-
-      <!-- =========================================================
-           HOME 3: AGENDA (CALENDÁRIO MENSAL & SEMANAL)
+           HOME 2: AGENDA (CALENDÁRIO MENSAL & SEMANAL)
            ========================================================= -->
       <section class="app-screen" id="screen-agenda" data-screen="agenda">
-        <!-- Calendar View Mode Switcher (Mês vs Semana) -->
         <div class="calendar-card">
           <div class="calendar-top-bar">
             <div class="cal-nav-group">
@@ -140,7 +164,6 @@
             </div>
           </div>
 
-          <!-- Weekday Headers (Dom - Sáb) -->
           <div class="calendar-weekdays">
             <span>Dom</span>
             <span>Seg</span>
@@ -151,18 +174,16 @@
             <span>Sáb</span>
           </div>
 
-          <!-- Days Grid (Month or Week dynamically rendered) -->
           <div class="calendar-grid" id="calendarGrid"></div>
 
-          <!-- Calendar Legend -->
           <div class="calendar-legend">
             <span class="legend-item"><i class="dot dot-task"></i> Compromisso</span>
-            <span class="legend-item"><i class="dot dot-habit"></i> Hábito agendado</span>
+            <span class="legend-item"><i class="dot dot-habit"></i> Hábito</span>
             <span class="legend-item"><i class="dot dot-done"></i> Concluído</span>
           </div>
         </div>
 
-        <!-- Selected Day Details & Week Overview -->
+        <!-- Selected Day Details -->
         <div class="selected-day-banner">
           <div class="selected-day-info">
             <span class="selected-day-tag" id="selectedDayRelativeTag">DIA SELECIONADO</span>
@@ -173,27 +194,25 @@
               + Agendar
             </button>
             <button type="button" class="btn-chip btn-chip-outline" onclick="switchScreen('hours')">
-              🕒 Ver Horários
+              🕒 Horários
             </button>
           </div>
         </div>
 
-        <!-- Commitments of Selected Date -->
         <div class="cards-stack" id="agendaDayItemsList"></div>
 
         <!-- Upcoming Week Summary Section -->
         <div class="section-bar" style="margin-top: 20px;">
           <h3>Resumo da Semana</h3>
-          <span class="sub-badge" id="weekSummaryRange">7 dias</span>
+          <span class="sub-badge">7 dias</span>
         </div>
         <div class="week-summary-list" id="weekSummaryContainer"></div>
       </section>
 
       <!-- =========================================================
-           HOME 4: HORÁRIOS (Time-blocking do Dia 06:00 às 23:00)
+           HOME 3: HORÁRIOS (Time-blocking do Dia 06:00 às 23:00 + Alarmes)
            ========================================================= -->
       <section class="app-screen" id="screen-hours" data-screen="hours">
-        <!-- Day Selector Banner inside Horários -->
         <div class="hours-day-bar">
           <button type="button" class="cal-nav-btn" id="btnHoursPrevDay" aria-label="Dia anterior">‹</button>
           <div class="hours-day-center">
@@ -204,7 +223,12 @@
           <button type="button" class="cal-today-btn" id="btnHoursToday">Hoje</button>
         </div>
 
-        <!-- Period Selector -->
+        <!-- Alarm Quick Test & Status Bar inside Horários -->
+        <div class="alarm-info-strip">
+          <span>⏰ Eventos com <strong>🔔</strong> tocam alarme sonoro no horário.</span>
+          <button type="button" class="btn-test-inline" onclick="triggerTestAlarm()">Testar Som</button>
+        </div>
+
         <div class="period-tabs">
           <button class="period-tab active" data-period="all">06h–23h</button>
           <button class="period-tab" data-period="morning">☀️ Manhã</button>
@@ -217,26 +241,16 @@
 
     </main>
 
-    <!-- Bottom Navigation Bar (4 Homes) -->
+    <!-- Bottom Navigation Bar (3 Main Homes: Hábitos | Agenda | Horários) -->
     <nav class="bottom-nav" aria-label="Navegação Principal">
-      <button class="nav-item active" data-target="start" type="button">
+      <button class="nav-item active" data-target="habits" type="button">
         <div class="nav-icon-wrap">
           <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
           </svg>
-          <span class="nav-badge" id="navBadgeStart">0</span>
+          <span class="nav-badge" id="navBadgeHabits">0</span>
         </div>
-        <span class="nav-label">Começar</span>
-      </button>
-
-      <button class="nav-item" data-target="stop" type="button">
-        <div class="nav-icon-wrap">
-          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          </svg>
-          <span class="nav-badge badge-orange" id="navBadgeStop">0</span>
-        </div>
-        <span class="nav-label">Deixar</span>
+        <span class="nav-label">Hábitos</span>
       </button>
 
       <button class="nav-item" data-target="agenda" type="button">
@@ -283,7 +297,7 @@
           </div>
 
           <div class="form-field">
-            <label>Categoria *</label>
+            <label>Sub-Home / Categoria *</label>
             <div class="category-selector">
               <label class="category-option">
                 <input type="radio" name="habitCategory" value="start" checked>
@@ -303,10 +317,8 @@
           </div>
 
           <div class="form-field" id="suggestedTimeField">
-            <label for="habitTime">Horário Sugerido / Alerta (Opcional)</label>
-            <select id="habitTime">
-              <option value="">Sem horário fixo</option>
-            </select>
+            <label for="habitTime">Horário Sugerido / Alarme (Opcional)</label>
+            <input type="time" id="habitTime" value="08:00">
           </div>
 
           <div class="form-field" id="quitStartDateField" style="display: none;">
@@ -317,7 +329,7 @@
           <div class="form-field" id="autoScheduleField">
             <label class="checkbox-label">
               <input type="checkbox" id="habitAutoSchedule" checked>
-              <span>Agendar automaticamente no horário sugerido de hoje</span>
+              <span>Agendar para hoje com alarme ativado 🔔</span>
             </label>
           </div>
 
@@ -330,7 +342,7 @@
     </div>
 
     <!-- =========================================================
-         BOTTOM SHEET 2: AGENDAR COMPROMISSO OU HÁBITO
+         BOTTOM SHEET 2: AGENDAR COMPROMISSO OU HÁBITO COM ALARME
          ========================================================= -->
     <div class="sheet-backdrop hidden" id="scheduleModal" role="dialog" aria-modal="true">
       <div class="bottom-sheet">
@@ -348,7 +360,7 @@
             </div>
             <div class="form-field">
               <label for="agendaTime">Horário *</label>
-              <select id="agendaTime" required></select>
+              <input type="time" id="agendaTime" required value="08:00">
             </div>
           </div>
 
@@ -374,12 +386,19 @@
 
           <div class="form-field" id="taskTitleGroup">
             <label for="agendaTaskTitle">Descrição do Compromisso *</label>
-            <input type="text" id="agendaTaskTitle" placeholder="Ex: Consulta médica, Reunião, Estudar..." maxlength="80">
+            <input type="text" id="agendaTaskTitle" placeholder="Ex: Tomar suplemento, Reunião, Estudar..." maxlength="80">
           </div>
 
           <div class="form-field hidden" id="habitSelectGroup">
             <label for="agendaHabitId">Selecione o Hábito ("Começar") *</label>
             <select id="agendaHabitId"></select>
+          </div>
+
+          <div class="form-field">
+            <label class="checkbox-label alarm-checkbox-box">
+              <input type="checkbox" id="agendaAlarmEnabled" checked>
+              <span>🔔 <strong>Tocar Alarme Sonoro</strong> quando der o horário</span>
+            </label>
           </div>
 
           <div class="sheet-actions">
@@ -403,6 +422,32 @@
         <div class="sheet-actions">
           <button type="button" class="btn btn-secondary" id="btnCancelRelapse">Cancelar</button>
           <button type="button" class="btn btn-danger" id="btnConfirmRelapse">Zerar Contador</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- =========================================================
+         MODAL DE ALARME TOCANDO (RINGING ALARM OVERLAY)
+         ========================================================= -->
+    <div class="alarm-ringing-backdrop hidden" id="alarmRingingModal" role="alertdialog" aria-modal="true">
+      <div class="alarm-ringing-card">
+        <div class="alarm-bell-pulse">🔔</div>
+        <span class="alarm-time-pill" id="alarmModalTime">08:00</span>
+        <h3 class="alarm-modal-title" id="alarmModalTitle">Hora do seu Compromisso!</h3>
+        <p class="alarm-modal-sub" id="alarmModalSub">Seu alarme agendado acabou de disparar.</p>
+
+        <div class="alarm-modal-actions">
+          <button type="button" class="btn btn-primary btn-full" id="btnAlarmCompleteNow">
+            ✓ Marcar como Concluído
+          </button>
+          <div class="alarm-secondary-row">
+            <button type="button" class="btn btn-secondary" id="btnAlarmSnooze">
+              💤 Soneca (+5 min)
+            </button>
+            <button type="button" class="btn btn-danger" id="btnAlarmDismiss">
+              ✕ Parar Alarme
+            </button>
+          </div>
         </div>
       </div>
     </div>

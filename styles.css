@@ -11,19 +11,19 @@
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
 
-  /* Home 1: Começar Hábito (Emerald / Mint) */
+  /* Sub-Home 1: Começar Hábito (Emerald / Mint) */
   --start-primary: #10b981;
   --start-secondary: #06b6d4;
   --start-glow: rgba(16, 185, 129, 0.16);
   --start-border: rgba(16, 185, 129, 0.35);
 
-  /* Home 2: Deixar Hábito (Amber / Coral) */
+  /* Sub-Home 2: Deixar Hábito (Amber / Coral) */
   --stop-primary: #f97316;
   --stop-danger: #ef4444;
   --stop-glow: rgba(249, 115, 22, 0.16);
   --stop-border: rgba(249, 115, 22, 0.35);
 
-  /* Home 3 & 4: Agenda & Horários (Blue / Indigo) */
+  /* Agenda & Horários (Blue / Indigo) */
   --accent-primary: #3b82f6;
   --accent-secondary: #6366f1;
   --accent-glow: rgba(59, 130, 246, 0.16);
@@ -73,6 +73,8 @@ body {
   border-radius: 12px;
   font-size: 0.8rem;
   color: var(--text-secondary);
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .preview-bar-left {
@@ -92,6 +94,7 @@ body {
 .preview-bar-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .preview-btn {
@@ -158,7 +161,7 @@ body {
 }
 
 /* =========================================================
-   MOBILE HEADER (Fixed Overflow Issue!)
+   MOBILE HEADER
    ========================================================= */
 .mobile-header {
   width: 100%;
@@ -177,37 +180,57 @@ body {
 
 .header-text-wrap {
   flex: 1;
-  min-width: 0; /* Impede que o texto empurre o botão para fora da tela */
+  min-width: 0;
   overflow: hidden;
+}
+
+.header-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
 }
 
 .header-date-pill {
   display: inline-block;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 700;
   color: #60a5fa;
   background: rgba(59, 130, 246, 0.14);
   padding: 2px 8px;
   border-radius: 999px;
   text-transform: capitalize;
-  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.alarm-status-pill {
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.14);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  padding: 2px 7px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .header-title {
   font-size: 1.08rem;
   font-weight: 800;
   letter-spacing: -0.02em;
-  margin-top: 2px;
+  margin-top: 3px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .header-add-btn {
-  flex-shrink: 0; /* Garante que o botão "+ Novo" nunca saia da tela */
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -266,6 +289,76 @@ body {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* =========================================================
+   SUB-HOME SWITCHER INSIDE HÁBITOS HOME (Começar | Deixar)
+   ========================================================= */
+.subhome-switcher {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  padding: 5px;
+  border-radius: 13px;
+  margin-bottom: 14px;
+}
+
+.subhome-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 9px 10px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.subhome-tab.active[data-subhome="start"] {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.22), rgba(6, 182, 212, 0.12));
+  color: #34d399;
+  border-color: var(--start-border);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15);
+}
+
+.subhome-tab.active[data-subhome="stop"] {
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.22), rgba(239, 68, 68, 0.12));
+  color: #fb923c;
+  border-color: var(--stop-border);
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.15);
+}
+
+.subhome-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.66rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+
+.subhome-count-stop {
+  background: rgba(249, 115, 22, 0.2);
+  color: #fb923c;
+}
+
+.subhome-pane {
+  display: none;
+  animation: fadeScreen 0.18s ease;
+}
+
+.subhome-pane.active {
+  display: block;
 }
 
 /* Hero Banner Cards */
@@ -691,7 +784,7 @@ body {
 }
 
 /* =========================================================
-   HOME 3: CALENDÁRIO MENSAL & SEMANAL (ABA AGENDA)
+   HOME 2: CALENDÁRIO MENSAL & SEMANAL (ABA AGENDA)
    ========================================================= */
 .calendar-card {
   background: var(--bg-card);
@@ -1007,7 +1100,7 @@ body {
   text-overflow: ellipsis;
 }
 
-/* Agenda Item Cards */
+/* Agenda Item Cards & Alarm Toggle */
 .agenda-card-mobile {
   display: flex;
   align-items: center;
@@ -1099,6 +1192,24 @@ body {
   color: #34d399;
 }
 
+.alarm-toggle-btn {
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 3px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.alarm-toggle-btn.alarm-on {
+  background: rgba(251, 191, 36, 0.15);
+  border-color: rgba(251, 191, 36, 0.4);
+  color: #fbbf24;
+}
+
 .item-title {
   font-size: 0.86rem;
   font-weight: 600;
@@ -1107,7 +1218,7 @@ body {
 }
 
 /* =========================================================
-   HOME 4: HORÁRIOS DO DIA (Time-blocking 06h - 23h)
+   HOME 3: HORÁRIOS DO DIA + ALARME
    ========================================================= */
 .hours-day-bar {
   display: flex;
@@ -1118,7 +1229,7 @@ body {
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
   padding: 8px 10px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .hours-day-center {
@@ -1139,6 +1250,34 @@ body {
   border-radius: 5px;
   background: rgba(59, 130, 246, 0.18);
   color: #60a5fa;
+}
+
+.alarm-info-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: 10px;
+  padding: 7px 10px;
+  margin-bottom: 10px;
+  font-size: 0.72rem;
+  color: #fde68a;
+}
+
+.btn-test-inline {
+  background: rgba(251, 191, 36, 0.2);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: #fbbf24;
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .period-tabs {
@@ -1280,6 +1419,13 @@ body {
   cursor: pointer;
 }
 
+.slot-mini-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: #60a5fa;
+  flex-shrink: 0;
+}
+
 .slot-mini-title {
   white-space: nowrap;
   overflow: hidden;
@@ -1312,15 +1458,17 @@ body {
   flex-shrink: 0;
 }
 
-/* Bottom Navigation Bar (4 Homes) */
+/* =========================================================
+   BOTTOM NAVIGATION BAR (3 Main Homes: Hábitos | Agenda | Horários)
+   ========================================================= */
 .bottom-nav {
   min-height: 66px;
-  padding: 6px 6px calc(8px + env(safe-area-inset-bottom));
+  padding: 6px 8px calc(8px + env(safe-area-inset-bottom));
   background: rgba(13, 19, 33, 0.97);
   backdrop-filter: blur(16px);
   border-top: 1px solid var(--border-subtle);
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   flex-shrink: 0;
   z-index: 30;
 }
@@ -1343,12 +1491,8 @@ body {
   color: var(--text-primary);
 }
 
-.nav-item.active[data-target="start"] svg {
+.nav-item.active[data-target="habits"] svg {
   color: var(--start-primary);
-}
-
-.nav-item.active[data-target="stop"] svg {
-  color: var(--stop-primary);
 }
 
 .nav-item.active[data-target="agenda"] svg,
@@ -1375,22 +1519,19 @@ body {
   color: #042f1e;
 }
 
-.nav-badge.badge-orange {
-  background: var(--stop-primary);
-  color: #fff;
-}
-
 .nav-badge.badge-blue {
   background: var(--accent-primary);
   color: #fff;
 }
 
 .nav-label {
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   font-weight: 700;
 }
 
-/* Bottom Sheet Modals */
+/* =========================================================
+   BOTTOM SHEET MODALS & RINGING ALARM MODAL
+   ========================================================= */
 .sheet-backdrop {
   position: absolute;
   inset: 0;
@@ -1464,7 +1605,7 @@ body {
 
 .form-row-2col {
   display: grid;
-  grid-template-columns: 1.2fr 0.8fr;
+  grid-template-columns: 1.15fr 0.85fr;
   gap: 8px;
 }
 
@@ -1476,6 +1617,7 @@ body {
 
 input[type="text"],
 input[type="date"],
+input[type="time"],
 input[type="datetime-local"],
 select {
   width: 100%;
@@ -1487,6 +1629,13 @@ select {
   padding: 10px 11px;
   border-radius: 10px;
   outline: none;
+}
+
+.alarm-checkbox-box {
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  padding: 10px 12px;
+  border-radius: 10px;
 }
 
 .category-selector {
@@ -1562,6 +1711,10 @@ select {
   text-align: center;
 }
 
+.btn-full {
+  width: 100%;
+}
+
 .btn-primary {
   background: var(--start-primary);
   color: #042f1e;
@@ -1580,6 +1733,89 @@ select {
 .btn-danger {
   background: var(--stop-danger);
   color: #fff;
+}
+
+/* Alarm Ringing Overlay Modal */
+.alarm-ringing-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 8, 15, 0.88);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 95;
+}
+
+.alarm-ringing-card {
+  width: 100%;
+  background: linear-gradient(160deg, #1b263d, #111827);
+  border: 2px solid #fbbf24;
+  border-radius: 24px;
+  padding: 24px 18px;
+  text-align: center;
+  box-shadow: 0 0 50px rgba(251, 191, 36, 0.35);
+  animation: fadeScreen 0.2s ease;
+}
+
+.alarm-bell-pulse {
+  width: 68px;
+  height: 68px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: rgba(251, 191, 36, 0.2);
+  border: 2px solid #fbbf24;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  animation: bellShake 0.6s infinite alternate ease-in-out;
+}
+
+@keyframes bellShake {
+  0% {
+    transform: rotate(-14deg) scale(1);
+  }
+  100% {
+    transform: rotate(14deg) scale(1.08);
+  }
+}
+
+.alarm-time-pill {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.14);
+  padding: 4px 14px;
+  border-radius: 999px;
+  margin-bottom: 10px;
+}
+
+.alarm-modal-title {
+  font-size: 1.18rem;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.alarm-modal-sub {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+}
+
+.alarm-modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.alarm-secondary-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 /* Empty State */
@@ -1602,7 +1838,7 @@ select {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  z-index: 80;
+  z-index: 99;
   pointer-events: none;
 }
 

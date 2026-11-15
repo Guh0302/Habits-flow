@@ -1,42 +1,44 @@
 /**
- * HabitFlow Mobile — 4 Homes:
- * 1. Começar (Modo Constância)
- * 2. Deixar (Modo Abstinência)
- * 3. Agenda (Calendário Mensal & Semanal com visão da Semana/Mês)
- * 4. Horários (Time-blocking hora a hora 06:00 às 23:00 do dia selecionado)
+ * HabitFlow Mobile — 3 Homes Principais + Sub-Homes de Hábitos + Motor de Alarme:
+ * 1. Hábitos (Unificada com 2 Sub-Homes: "🔥 Para Começar" e "🛡️ Para Deixar")
+ * 2. Agenda (Calendário Mensal & Semanal com visão da Semana/Mês)
+ * 3. Horários (Time-blocking hora a hora 06:00 às 23:00 + Alarmes Sonoros)
  */
 
 const STORAGE_KEYS = {
-  HABITS: 'habitflow_habits_v2',
-  AGENDA: 'habitflow_agenda_v2'
+  HABITS: 'habitflow_habits_v3',
+  AGENDA: 'habitflow_agenda_v3',
+  FIRED_ALARMS: 'habitflow_fired_alarms_v3'
 };
 
 const MILESTONES = [7, 21, 30, 90];
-const HOURS_RANGE = Array.from({ length: 18 }, (_, i) => {
-  const hour = i + 6; // 06:00 às 23:00
-  return `${String(hour).padStart(2, '0')}:00`;
-});
 
 const SCREEN_TITLES = {
-  start: 'Hábitos para Começar',
-  stop: 'Hábitos para Deixar',
+  habits: 'Meus Hábitos',
   agenda: 'Calendário & Agenda',
   hours: 'Horários do Dia'
 };
 
 let state = {
-  activeScreen: 'start', // 'start' | 'stop' | 'agenda' | 'hours'
+  activeScreen: 'habits', // 'habits' | 'agenda' | 'hours'
+  activeSubHome: 'start', // 'start' | 'stop' (dentro da Home Hábitos)
   habits: [],
-  agenda: [], // [{ id, dateKey, time, type: 'task' | 'habit', title, habitId, completed }]
+  agenda: [], // [{ id, dateKey, time, type: 'task' | 'habit', title, habitId, completed, alarmEnabled }]
   calendarMode: 'month', // 'month' | 'week'
   selectedDateKey: '', // YYYY-MM-DD
-  calendarCursorDate: new Date(), // Date object for month/week navigation
+  calendarCursorDate: new Date(),
   hoursPeriod: 'all', // 'all' | 'morning' | 'afternoon' | 'night'
-  pendingRelapseHabitId: null
+  pendingRelapseHabitId: null,
+  activeRingingItem: null,
+  firedAlarms: {} // { "ag_id_2026-11-15_08:00": true }
 };
 
+// Web Audio API Alarm Synthesizer State
+let audioCtx = null;
+let alarmIntervalId = null;
+
 // ==========================================
-// UTILITÁRIOS DE DATA E CALENDÁRIO
+// UTILITÁRIOS DE DATA E HORA
 // ==========================================
 
 function getDateKey(dateObj = new Date()) {
@@ -48,6 +50,19 @@ function getDateKey(dateObj = new Date()) {
 
 function getTodayKey() {
   return getDateKey(new Date());
+}
+
+function getCurrentTimeHHMM(dateObj = new Date()) {
+  const h = String(dateObj.getHours()).padStart(2, '0');
+  const m = String(dateObj.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+function addMinutesToHHMM(hhmm, addMins) {
+  const [h, m] = String(hhmm).split(':').map(Number);
+  const d = new Date();
+  d.setHours(h || 0, (m || 0) + addMins, 0, 0);
+  return getCurrentTimeHHMM(d);
 }
 
 function parseDateKey(dateKey) {
@@ -94,8 +109,7 @@ function getRelativeDayTag(dateKey) {
 function updateStatusBarClock() {
   const el = document.getElementById('statusBarClock');
   if (!el) return;
-  const now = new Date();
-  el.textContent = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  el.textContent = getCurrentTimeHHMM(new Date());
 }
 
 function calculateAbstinenceDuration(startTimestamp) {
@@ -144,6 +158,171 @@ function computeBuildStreak(completedDates = []) {
 }
 
 // ==========================================
+// SISTEMA DE ALARME SONORO, VIBRAÇÃO E NOTIFICAÇÃO
+// ==========================================
+
+function ensureAudioContext() {
+  if (!audioCtx) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) {
+      audioCtx = new AudioContextClass();
+    }
+  }
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
+}
+
+function playSingleAlarmChime() {
+  try {
+    ensureAudioContext();
+    if (!audioCtx) return;
+
+    const now = audioCtx.currentTime;
+    const notes = [587.33, 783.99, 880.0, 1174.66]; // D5, G5, A5, D6
+    notes.forEach((freq, idx) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.14);
+
+      gain.gain.setValueAtTime(0.001, now + idx * 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.24, now + idx * 0.14 + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.14 + 0.22);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start(now + idx * 0.14);
+      osc.stop(now + idx * 0.14 + 0.24);
+    });
+
+    if ('vibrate' in navigator) {
+      navigator.vibrate([300, 120, 300]);
+    }
+  } catch (e) {
+    console.warn('Erro ao reproduzir som do alarme:', e);
+  }
+}
+
+function startAlarmSoundLoop() {
+  stopAlarmSoundLoop();
+  playSingleAlarmChime();
+  alarmIntervalId = setInterval(playSingleAlarmChime, 1600);
+}
+
+function stopAlarmSoundLoop() {
+  if (alarmIntervalId) {
+    clearInterval(alarmIntervalId);
+    alarmIntervalId = null;
+  }
+  if ('vibrate' in navigator) {
+    navigator.vibrate(0);
+  }
+}
+
+async function requestAlarmNotificationPermission() {
+  ensureAudioContext();
+  if (!('Notification' in window)) {
+    showToast('Alarme sonoro interno ativo neste navegador!');
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    playSingleAlarmChime();
+    showToast('🔔 Alarme sonoro e notificações já estão ativos!');
+    updateAlarmPermissionBadge();
+    return;
+  }
+  try {
+    const perm = await Notification.requestPermission();
+    updateAlarmPermissionBadge();
+    if (perm === 'granted') {
+      playSingleAlarmChime();
+      showToast('🔔 Permissão concedida! Seus alarmes notificarão no horário.');
+    } else {
+      showToast('Alarme sonoro funcionará com o app aberto.');
+    }
+  } catch (e) {
+    showToast('Alarme sonoro interno ativado.');
+  }
+}
+
+function updateAlarmPermissionBadge() {
+  const btn = document.getElementById('btnAlarmTogglePermission');
+  if (!btn) return;
+  if ('Notification' in window && Notification.permission === 'granted') {
+    btn.textContent = '🔔 Alarme & Push ON';
+  } else {
+    btn.textContent = '🔔 Alarme Ativo';
+  }
+}
+
+function triggerAlarmModal(item, isTest = false) {
+  state.activeRingingItem = item;
+  document.getElementById('alarmModalTime').textContent = item.time || getCurrentTimeHHMM();
+  document.getElementById('alarmModalTitle').textContent = item.title;
+  document.getElementById('alarmModalSub').textContent = isTest
+    ? 'Este é um teste do seu alarme sonoro da agenda!'
+    : (item.type === 'habit'
+        ? '🔥 Hora de praticar seu hábito e aumentar sua sequência!'
+        : '📌 Compromisso agendado para este horário.');
+
+  document.getElementById('alarmRingingModal').classList.remove('hidden');
+  startAlarmSoundLoop();
+
+  // Disparar notificação nativa do sistema se permitido
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification(`⏰ ${item.time} — ${item.title}`, {
+        body: item.type === 'habit'
+          ? 'Hora do seu hábito no HabitFlow!'
+          : 'Compromisso agendado no HabitFlow!',
+        tag: item.id || 'habitflow-alarm'
+      });
+    } catch (e) {}
+  }
+}
+
+function triggerTestAlarm() {
+  ensureAudioContext();
+  const sampleItem = state.agenda.find(a => a.dateKey === getTodayKey() && !a.completed) || {
+    id: 'test_alarm',
+    dateKey: getTodayKey(),
+    time: getCurrentTimeHHMM(),
+    type: 'habit',
+    title: 'Exemplo: Hora de Executar seu Hábito!',
+    completed: false,
+    isTestOnly: true
+  };
+  triggerAlarmModal(sampleItem, true);
+}
+
+function checkScheduledAlarms() {
+  const todayKey = getTodayKey();
+  const currentHHMM = getCurrentTimeHHMM();
+
+  // Não sobrepor se já houver um alarme tocando na tela
+  if (state.activeRingingItem) return;
+
+  const dueItem = state.agenda.find(item => {
+    if (item.dateKey !== todayKey) return false;
+    if (item.completed) return false;
+    if (item.alarmEnabled === false) return false;
+    if (item.time !== currentHHMM) return false;
+
+    const fireKey = `${item.id}_${todayKey}_${item.time}`;
+    return !state.firedAlarms[fireKey];
+  });
+
+  if (dueItem) {
+    const fireKey = `${dueItem.id}_${todayKey}_${dueItem.time}`;
+    state.firedAlarms[fireKey] = true;
+    saveState();
+    triggerAlarmModal(dueItem, false);
+  }
+}
+
+// ==========================================
 // DADOS DEMO & LOCALSTORAGE
 // ==========================================
 
@@ -185,7 +364,7 @@ function createDemoData() {
       id: 'hab_start_3',
       name: 'Treino de Força & Mobilidade',
       category: 'start',
-      suggestedTime: '18:00',
+      suggestedTime: '18:30',
       completedDates: [dMinus3, dMinus2, dMinus1],
       bestStreak: 12,
       createdAt: now - 25 * dayMs
@@ -213,7 +392,6 @@ function createDemoData() {
   ];
 
   state.agenda = [
-    // Hoje
     {
       id: 'ag_1',
       dateKey: today,
@@ -221,7 +399,8 @@ function createDemoData() {
       type: 'habit',
       habitId: 'hab_start_1',
       title: 'Leitura Focada (20 páginas)',
-      completed: true
+      completed: true,
+      alarmEnabled: true
     },
     {
       id: 'ag_2',
@@ -230,7 +409,8 @@ function createDemoData() {
       type: 'habit',
       habitId: 'hab_start_2',
       title: 'Meditação Mindfulness (10 min)',
-      completed: true
+      completed: true,
+      alarmEnabled: true
     },
     {
       id: 'ag_3',
@@ -239,7 +419,8 @@ function createDemoData() {
       type: 'task',
       habitId: null,
       title: 'Reunião de alinhamento semanal',
-      completed: false
+      completed: false,
+      alarmEnabled: true
     },
     {
       id: 'ag_4',
@@ -248,18 +429,19 @@ function createDemoData() {
       type: 'task',
       habitId: null,
       title: 'Revisar metas e organizar entregas',
-      completed: false
+      completed: false,
+      alarmEnabled: true
     },
     {
       id: 'ag_5',
       dateKey: today,
-      time: '18:00',
+      time: '18:30',
       type: 'habit',
       habitId: 'hab_start_3',
       title: 'Treino de Força & Mobilidade',
-      completed: false
+      completed: false,
+      alarmEnabled: true
     },
-    // Amanhã
     {
       id: 'ag_6',
       dateKey: dPlus1,
@@ -267,18 +449,19 @@ function createDemoData() {
       type: 'task',
       habitId: null,
       title: 'Consulta médica / Check-up',
-      completed: false
+      completed: false,
+      alarmEnabled: true
     },
     {
       id: 'ag_7',
       dateKey: dPlus1,
-      time: '18:00',
+      time: '18:30',
       type: 'habit',
       habitId: 'hab_start_3',
       title: 'Treino de Força & Mobilidade',
-      completed: false
+      completed: false,
+      alarmEnabled: true
     },
-    // Daqui a 2 dias
     {
       id: 'ag_8',
       dateKey: dPlus2,
@@ -286,9 +469,9 @@ function createDemoData() {
       type: 'task',
       habitId: null,
       title: 'Apresentação de resultados do mês',
-      completed: false
+      completed: false,
+      alarmEnabled: true
     },
-    // Daqui a 4 dias
     {
       id: 'ag_9',
       dateKey: dPlus4,
@@ -296,10 +479,12 @@ function createDemoData() {
       type: 'task',
       habitId: null,
       title: 'Planejamento financeiro mensal',
-      completed: false
+      completed: false,
+      alarmEnabled: true
     }
   ];
 
+  state.firedAlarms = {};
   saveState();
 }
 
@@ -308,18 +493,22 @@ function loadState() {
   state.calendarCursorDate = new Date();
 
   try {
-    const rawHabits = localStorage.getItem(STORAGE_KEYS.HABITS);
-    const rawAgenda = localStorage.getItem(STORAGE_KEYS.AGENDA);
+    const rawHabits = localStorage.getItem(STORAGE_KEYS.HABITS) || localStorage.getItem('habitflow_habits_v2');
+    const rawAgenda = localStorage.getItem(STORAGE_KEYS.AGENDA) || localStorage.getItem('habitflow_agenda_v2');
+    const rawFired = localStorage.getItem(STORAGE_KEYS.FIRED_ALARMS);
+
     if (!rawHabits && !rawAgenda) {
       createDemoData();
       return;
     }
     state.habits = rawHabits ? JSON.parse(rawHabits) : [];
     state.agenda = rawAgenda ? JSON.parse(rawAgenda) : [];
-    // Garantir que todo item da agenda tenha dateKey
+    state.firedAlarms = rawFired ? JSON.parse(rawFired) : {};
+
     const today = getTodayKey();
     state.agenda.forEach(item => {
       if (!item.dateKey) item.dateKey = today;
+      if (typeof item.alarmEnabled === 'undefined') item.alarmEnabled = true;
     });
     syncAgendaWithHabits();
   } catch (e) {
@@ -330,6 +519,7 @@ function loadState() {
 function saveState() {
   localStorage.setItem(STORAGE_KEYS.HABITS, JSON.stringify(state.habits));
   localStorage.setItem(STORAGE_KEYS.AGENDA, JSON.stringify(state.agenda));
+  localStorage.setItem(STORAGE_KEYS.FIRED_ALARMS, JSON.stringify(state.firedAlarms));
 }
 
 function syncAgendaWithHabits() {
@@ -346,7 +536,7 @@ function syncAgendaWithHabits() {
 }
 
 // ==========================================
-// NAVEGAÇÃO ENTRE AS 4 HOMES
+// NAVEGAÇÃO ENTRE AS 3 HOMES E SUB-HOMES DE HÁBITOS
 // ==========================================
 
 function switchScreen(screenKey) {
@@ -363,6 +553,19 @@ function switchScreen(screenKey) {
   document.getElementById('screenHeaderTitle').textContent = SCREEN_TITLES[screenKey] || 'HabitFlow';
   document.getElementById('mobileViewport').scrollTop = 0;
   renderAll();
+}
+
+function switchSubHome(subKey) {
+  state.activeSubHome = subKey; // 'start' | 'stop'
+
+  document.querySelectorAll('.subhome-tab').forEach(btn => {
+    const isActive = btn.dataset.subhome === subKey;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+
+  document.getElementById('subhome-start').classList.toggle('active', subKey === 'start');
+  document.getElementById('subhome-stop').classList.toggle('active', subKey === 'stop');
 }
 
 function selectCalendarDate(dateKey) {
@@ -461,7 +664,7 @@ function deleteHabit(habitId) {
   showToast(`Hábito "${habit.name}" removido.`);
 }
 
-function addAgendaItem({ dateKey, time, type, title, habitId }) {
+function addAgendaItem({ dateKey, time, type, title, habitId, alarmEnabled = true }) {
   const targetDate = dateKey || state.selectedDateKey || getTodayKey();
 
   if (type === 'habit') {
@@ -487,13 +690,14 @@ function addAgendaItem({ dateKey, time, type, title, habitId }) {
       type: 'habit',
       habitId: habit.id,
       title: habit.name,
-      completed: isDone
+      completed: isDone,
+      alarmEnabled: Boolean(alarmEnabled)
     });
 
     state.selectedDateKey = targetDate;
     saveState();
     renderAll();
-    showToast(`Hábito "${habit.name}" agendado às ${time}!`);
+    showToast(`Hábito "${habit.name}" agendado às ${time}${alarmEnabled ? ' com alarme 🔔' : ''}!`);
     return true;
   } else {
     const clean = (title || '').trim();
@@ -509,13 +713,14 @@ function addAgendaItem({ dateKey, time, type, title, habitId }) {
       type: 'task',
       habitId: null,
       title: clean,
-      completed: false
+      completed: false,
+      alarmEnabled: Boolean(alarmEnabled)
     });
 
     state.selectedDateKey = targetDate;
     saveState();
     renderAll();
-    showToast(`Compromisso agendado para ${time}!`);
+    showToast(`Compromisso agendado para ${time}${alarmEnabled ? ' com alarme 🔔' : ''}!`);
     return true;
   }
 }
@@ -533,6 +738,20 @@ function toggleAgendaItem(itemId) {
   }
 }
 
+function toggleAgendaItemAlarm(itemId) {
+  const item = state.agenda.find(a => a.id === itemId);
+  if (!item) return;
+
+  ensureAudioContext();
+  item.alarmEnabled = !item.alarmEnabled;
+  saveState();
+  renderAll();
+  showToast(item.alarmEnabled
+    ? `🔔 Alarme ativado para "${item.title}" às ${item.time}`
+    : `🔕 Alarme desativado para "${item.title}"`
+  );
+}
+
 function removeAgendaItem(itemId) {
   state.agenda = state.agenda.filter(a => a.id !== itemId);
   saveState();
@@ -540,7 +759,7 @@ function removeAgendaItem(itemId) {
 }
 
 // ==========================================
-// RENDERIZAÇÃO DAS 4 HOMES
+// RENDERIZAÇÃO DA INTERFACE
 // ==========================================
 
 function escapeHtml(str = '') {
@@ -571,10 +790,18 @@ function buildMilestoneHtml(currentDays) {
   `;
 }
 
-// HOME 1: COMEÇAR HÁBITO
-function renderHomeStart() {
+// HOME 1: HÁBITOS (Sub-Home Começar + Sub-Home Deixar)
+function renderHomeHabits() {
   const today = getTodayKey();
   const startHabits = state.habits.filter(h => h.category === 'start');
+  const stopHabits = state.habits.filter(h => h.category === 'stop');
+
+  // Badges nas Sub-Homes e na Barra Inferior
+  document.getElementById('subCountStart').textContent = startHabits.length;
+  document.getElementById('subCountStop').textContent = stopHabits.length;
+  document.getElementById('navBadgeHabits').textContent = state.habits.length;
+
+  // --- SUB-HOME 1.A: COMEÇAR HÁBITO ---
   const doneCount = startHabits.filter(
     h => Array.isArray(h.completedDates) && h.completedDates.includes(today)
   ).length;
@@ -583,65 +810,59 @@ function renderHomeStart() {
   document.getElementById('startHeroStat').textContent = `${doneCount} de ${startHabits.length} concluídos hoje`;
   document.getElementById('startHeroPct').textContent = `${pct}%`;
   document.getElementById('startHeroFill').style.width = `${pct}%`;
-  document.getElementById('navBadgeStart').textContent = startHabits.length;
 
-  const listEl = document.getElementById('startHabitsList');
+  const startListEl = document.getElementById('startHabitsList');
   if (startHabits.length === 0) {
-    listEl.innerHTML = `<div class="empty-state">Nenhum hábito em construção.<br>Toque em <strong>+ Hábito</strong> para começar!</div>`;
-    return;
+    startListEl.innerHTML = `<div class="empty-state">Nenhum hábito para começar cadastrado.<br>Toque em <strong>+ Começar Hábito</strong>!</div>`;
+  } else {
+    startListEl.innerHTML = startHabits.map(habit => {
+      const completedDates = Array.isArray(habit.completedDates) ? habit.completedDates : [];
+      const isCheckedToday = completedDates.includes(today);
+      const currentStreak = computeBuildStreak(completedDates);
+      const totalDays = completedDates.length;
+      const bestStreak = Math.max(habit.bestStreak || 0, currentStreak);
+
+      return `
+        <article class="habit-card card-start">
+          <div class="card-top">
+            <div class="habit-info">
+              <h4>${escapeHtml(habit.name)}</h4>
+              <div class="chip-row">
+                ${habit.suggestedTime ? `<span class="time-badge">⏰ ${habit.suggestedTime}</span>` : ''}
+                <span class="sub-badge">Constância diária</span>
+              </div>
+            </div>
+            <div class="card-actions">
+              ${habit.suggestedTime ? `
+                <button class="icon-btn" type="button" onclick="quickScheduleHabit('${habit.id}')" title="Agendar hoje às ${habit.suggestedTime} com alarme">🔔</button>
+              ` : ''}
+              <button class="icon-btn" type="button" onclick="openEditHabitModal('${habit.id}')" title="Editar">✎</button>
+              <button class="icon-btn" type="button" onclick="deleteHabit('${habit.id}')" title="Excluir">🗑</button>
+            </div>
+          </div>
+
+          <div class="counter-box">
+            <div>
+              <span class="primary-counter">🔥 ${currentStreak} <span class="counter-unit">${currentStreak === 1 ? 'dia' : 'dias'}</span></span>
+              <div class="secondary-metrics">
+                <span class="metric-tag">Total: <strong>${totalDays}d</strong></span>
+                <span class="metric-tag">Recorde: <strong>${bestStreak}d</strong></span>
+              </div>
+            </div>
+
+            <button type="button" class="btn-checkin-mobile ${isCheckedToday ? 'checked-today' : ''}" onclick="toggleStartHabitOnDate('${habit.id}')">
+              ${isCheckedToday ? '✓ Feito Hoje' : 'Check-in'}
+            </button>
+          </div>
+
+          ${buildMilestoneHtml(currentStreak)}
+        </article>
+      `;
+    }).join('');
   }
 
-  listEl.innerHTML = startHabits.map(habit => {
-    const completedDates = Array.isArray(habit.completedDates) ? habit.completedDates : [];
-    const isCheckedToday = completedDates.includes(today);
-    const currentStreak = computeBuildStreak(completedDates);
-    const totalDays = completedDates.length;
-    const bestStreak = Math.max(habit.bestStreak || 0, currentStreak);
-
-    return `
-      <article class="habit-card card-start">
-        <div class="card-top">
-          <div class="habit-info">
-            <h4>${escapeHtml(habit.name)}</h4>
-            <div class="chip-row">
-              ${habit.suggestedTime ? `<span class="time-badge">⏰ ${habit.suggestedTime}</span>` : ''}
-              <span class="sub-badge">Constância diária</span>
-            </div>
-          </div>
-          <div class="card-actions">
-            ${habit.suggestedTime ? `
-              <button class="icon-btn" type="button" onclick="quickScheduleHabit('${habit.id}')" title="Agendar hoje às ${habit.suggestedTime}">📅</button>
-            ` : ''}
-            <button class="icon-btn" type="button" onclick="openEditHabitModal('${habit.id}')" title="Editar">✎</button>
-            <button class="icon-btn" type="button" onclick="deleteHabit('${habit.id}')" title="Excluir">🗑</button>
-          </div>
-        </div>
-
-        <div class="counter-box">
-          <div>
-            <span class="primary-counter">🔥 ${currentStreak} <span class="counter-unit">${currentStreak === 1 ? 'dia' : 'dias'}</span></span>
-            <div class="secondary-metrics">
-              <span class="metric-tag">Total: <strong>${totalDays}d</strong></span>
-              <span class="metric-tag">Recorde: <strong>${bestStreak}d</strong></span>
-            </div>
-          </div>
-
-          <button type="button" class="btn-checkin-mobile ${isCheckedToday ? 'checked-today' : ''}" onclick="toggleStartHabitOnDate('${habit.id}')">
-            ${isCheckedToday ? '✓ Feito Hoje' : 'Check-in'}
-          </button>
-        </div>
-
-        ${buildMilestoneHtml(currentStreak)}
-      </article>
-    `;
-  }).join('');
-}
-
-// HOME 2: DEIXAR HÁBITO
-function renderHomeStop() {
-  const stopHabits = state.habits.filter(h => h.category === 'stop');
+  // --- SUB-HOME 1.B: DEIXAR HÁBITO ---
   document.getElementById('stopHeroStat').textContent = `${stopHabits.length} ${stopHabits.length === 1 ? 'hábito monitorado' : 'hábitos monitorados'}`;
-  document.getElementById('navBadgeStop').textContent = stopHabits.length;
 
   let maxRecord = 0;
   stopHabits.forEach(h => {
@@ -651,80 +872,76 @@ function renderHomeStop() {
   });
   document.getElementById('stopBestOverall').textContent = `${maxRecord} dias`;
 
-  const listEl = document.getElementById('stopHabitsList');
+  const stopListEl = document.getElementById('stopHabitsList');
   if (stopHabits.length === 0) {
-    listEl.innerHTML = `<div class="empty-state">Nenhum hábito em modo abstinência.<br>Toque em <strong>+ Parar Hábito</strong> para iniciar!</div>`;
-    return;
+    stopListEl.innerHTML = `<div class="empty-state">Nenhum hábito em modo abstinência.<br>Toque em <strong>+ Deixar Hábito</strong> para iniciar!</div>`;
+  } else {
+    stopListEl.innerHTML = stopHabits.map(habit => {
+      const { days, hours, minutes } = calculateAbstinenceDuration(habit.abstinenceStartTimestamp);
+      const bestRecord = Math.max(habit.bestRecordDays || 0, days);
+      const startedStr = new Date(Number(habit.abstinenceStartTimestamp)).toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+
+      return `
+        <article class="habit-card card-stop">
+          <div class="card-top">
+            <div class="habit-info">
+              <h4>${escapeHtml(habit.name)}</h4>
+              <div class="chip-row">
+                ${habit.suggestedTime ? `<span class="time-badge">⚠️ Alerta ${habit.suggestedTime}</span>` : ''}
+                <span class="sub-badge">Desde ${startedStr}</span>
+              </div>
+            </div>
+            <div class="card-actions">
+              <button class="icon-btn" type="button" onclick="openEditHabitModal('${habit.id}')" title="Editar">✎</button>
+              <button class="icon-btn" type="button" onclick="deleteHabit('${habit.id}')" title="Excluir">🗑</button>
+            </div>
+          </div>
+
+          <div class="counter-box">
+            <div>
+              <span class="primary-counter">🛡️ ${days}d ${hours}h <span class="counter-unit">${minutes}m</span></span>
+              <div class="secondary-metrics">
+                <span class="metric-tag">Recorde: <strong>${bestRecord}d</strong></span>
+                <span class="metric-tag">Recaídas: <strong>${habit.relapseCount || 0}</strong></span>
+              </div>
+            </div>
+
+            <button type="button" class="btn-relapse-mobile" onclick="openRelapseModal('${habit.id}')">
+              ↺ Recaída
+            </button>
+          </div>
+
+          ${buildMilestoneHtml(days)}
+        </article>
+      `;
+    }).join('');
   }
-
-  listEl.innerHTML = stopHabits.map(habit => {
-    const { days, hours, minutes } = calculateAbstinenceDuration(habit.abstinenceStartTimestamp);
-    const bestRecord = Math.max(habit.bestRecordDays || 0, days);
-    const startedStr = new Date(Number(habit.abstinenceStartTimestamp)).toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-
-    return `
-      <article class="habit-card card-stop">
-        <div class="card-top">
-          <div class="habit-info">
-            <h4>${escapeHtml(habit.name)}</h4>
-            <div class="chip-row">
-              ${habit.suggestedTime ? `<span class="time-badge">⚠️ Alerta ${habit.suggestedTime}</span>` : ''}
-              <span class="sub-badge">Desde ${startedStr}</span>
-            </div>
-          </div>
-          <div class="card-actions">
-            <button class="icon-btn" type="button" onclick="openEditHabitModal('${habit.id}')" title="Editar">✎</button>
-            <button class="icon-btn" type="button" onclick="deleteHabit('${habit.id}')" title="Excluir">🗑</button>
-          </div>
-        </div>
-
-        <div class="counter-box">
-          <div>
-            <span class="primary-counter">🛡️ ${days}d ${hours}h <span class="counter-unit">${minutes}m</span></span>
-            <div class="secondary-metrics">
-              <span class="metric-tag">Recorde: <strong>${bestRecord}d</strong></span>
-              <span class="metric-tag">Recaídas: <strong>${habit.relapseCount || 0}</strong></span>
-            </div>
-          </div>
-
-          <button type="button" class="btn-relapse-mobile" onclick="openRelapseModal('${habit.id}')">
-            ↺ Recaída
-          </button>
-        </div>
-
-        ${buildMilestoneHtml(days)}
-      </article>
-    `;
-  }).join('');
 }
 
-// HOME 3: AGENDA (CALENDÁRIO MENSAL & SEMANAL)
+// HOME 2: AGENDA (CALENDÁRIO MENSAL & SEMANAL)
 function renderHomeAgenda() {
   const todayKey = getTodayKey();
   const cursor = state.calendarCursorDate;
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
 
-  // Badge na barra inferior mostra compromissos pendentes de hoje
   const pendingToday = state.agenda.filter(a => a.dateKey === todayKey && !a.completed).length;
   document.getElementById('navBadgeAgenda').textContent = pendingToday;
 
-  // Título do Mês/Ano no topo do calendário
   const monthLabel = cursor.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
   document.getElementById('calendarTitleLabel').textContent = monthLabel;
 
-  // Construir células do Calendário (Mês completo ou Semana de 7 dias)
   const gridEl = document.getElementById('calendarGrid');
   let cells = [];
 
   if (state.calendarMode === 'month') {
     const firstDayOfMonth = new Date(year, month, 1);
-    const startWeekday = firstDayOfMonth.getDay(); // 0 (Dom) a 6 (Sáb)
+    const startWeekday = firstDayOfMonth.getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
 
     const prevMonthDays = new Date(year, month, 0).getDate();
@@ -744,7 +961,6 @@ function renderHomeAgenda() {
       cells.push({ dateObj: d, dateKey: getDateKey(d), otherMonth: true });
     }
   } else {
-    // Modo Semana: domingo a sábado da semana do cursor
     const startOfWeek = new Date(cursor);
     startOfWeek.setDate(cursor.getDate() - cursor.getDay());
     for (let i = 0; i < 7; i++) {
@@ -781,18 +997,16 @@ function renderHomeAgenda() {
     `;
   }).join('');
 
-  // Atualizar Banner do Dia Selecionado
   document.getElementById('selectedDayRelativeTag').textContent = getRelativeDayTag(state.selectedDateKey);
   document.getElementById('selectedDayTitle').textContent = formatDayFullLabel(state.selectedDateKey);
 
-  // Listar compromissos do Dia Selecionado
   const dayItems = state.agenda
     .filter(a => a.dateKey === state.selectedDateKey)
     .sort((a, b) => a.time.localeCompare(b.time));
 
   const dayListEl = document.getElementById('agendaDayItemsList');
   if (dayItems.length === 0) {
-    dayListEl.innerHTML = `<div class="empty-state">Nenhum compromisso agendado para esta data.<br>Toque em <strong>+ Agendar</strong> para incluir!</div>`;
+    dayListEl.innerHTML = `<div class="empty-state">Nenhum compromisso para esta data.<br>Toque em <strong>+ Agendar</strong> para criar com alarme!</div>`;
   } else {
     dayListEl.innerHTML = dayItems.map(item => `
       <div class="agenda-card-mobile ${item.type === 'habit' ? 'item-habit' : ''} ${item.completed ? 'completed' : ''}">
@@ -801,17 +1015,25 @@ function renderHomeAgenda() {
           <div class="agenda-item-info">
             <div class="agenda-item-top">
               <span class="agenda-time-tag">🕒 ${item.time}</span>
-              ${item.type === 'habit' ? `<span class="habit-link-badge">🔥 Hábito</span>` : `<span class="sub-badge">Compromisso</span>`}
+              ${item.type === 'habit' ? `<span class="habit-link-badge">🔥 Hábito</span>` : `<span class="sub-badge">Evento</span>`}
             </div>
             <span class="item-title">${escapeHtml(item.title)}</span>
           </div>
         </div>
+        <button
+          type="button"
+          class="alarm-toggle-btn ${item.alarmEnabled !== false ? 'alarm-on' : ''}"
+          onclick="toggleAgendaItemAlarm('${item.id}')"
+          title="${item.alarmEnabled !== false ? 'Alarme ativado (toque para silenciar)' : 'Alarme silenciado (toque para ativar)'}"
+        >
+          ${item.alarmEnabled !== false ? '🔔 ON' : '🔕 OFF'}
+        </button>
         <button class="icon-btn" type="button" onclick="removeAgendaItem('${item.id}')" title="Remover">✕</button>
       </div>
     `).join('');
   }
 
-  // Renderizar Resumo da Semana (Dom a Sáb da semana selecionada)
+  // Resumo da Semana
   const selDate = parseDateKey(state.selectedDateKey);
   const weekStart = new Date(selDate);
   weekStart.setDate(selDate.getDate() - selDate.getDay());
@@ -850,7 +1072,7 @@ function renderHomeAgenda() {
   document.getElementById('weekSummaryContainer').innerHTML = weekRowsHtml;
 }
 
-// HOME 4: HORÁRIOS DO DIA (Time-blocking 06:00 às 23:00)
+// HOME 3: HORÁRIOS DO DIA (Time-blocking 06:00 às 23:00 + Alarmes)
 function renderHomeHours() {
   const container = document.getElementById('timelineContainer');
   const todayKey = getTodayKey();
@@ -866,9 +1088,9 @@ function renderHomeHours() {
   });
 
   const periods = [
-    { id: 'morning', label: '☀️ Manhã (06:00 – 11:00)', min: 6, max: 11 },
-    { id: 'afternoon', label: '🌤️ Tarde (12:00 – 17:00)', min: 12, max: 17 },
-    { id: 'night', label: '🌙 Noite (18:00 – 23:00)', min: 18, max: 23 }
+    { id: 'morning', label: '☀️ Manhã (06:00 – 11:59)', min: 6, max: 11 },
+    { id: 'afternoon', label: '🌤️ Tarde (12:00 – 17:59)', min: 12, max: 17 },
+    { id: 'night', label: '🌙 Noite (18:00 – 23:59)', min: 18, max: 23 }
   ];
 
   let html = '';
@@ -879,10 +1101,14 @@ function renderHomeHours() {
     html += `<div class="period-divider">${period.label}</div>`;
 
     for (let h = period.min; h <= period.max; h++) {
-      const timeStr = `${String(h).padStart(2, '0')}:00`;
-      const slotItems = state.agenda.filter(
-        a => a.dateKey === state.selectedDateKey && a.time === timeStr
-      );
+      const hourPrefix = String(h).padStart(2, '0');
+      const timeStr = `${hourPrefix}:00`;
+
+      // Agrupa todos os eventos daquela hora (ex: 18:00, 18:30, 18:45 ficam no bloco das 18h)
+      const slotItems = state.agenda
+        .filter(a => a.dateKey === state.selectedDateKey && String(a.time).startsWith(hourPrefix + ':'))
+        .sort((a, b) => a.time.localeCompare(b.time));
+
       const isNow = isTodaySelected && h === currentHourNum;
 
       const itemsHtml = slotItems.length === 0
@@ -891,8 +1117,17 @@ function renderHomeHours() {
             <div class="slot-mini-item ${item.type === 'habit' ? 'item-habit' : ''} ${item.completed ? 'completed' : ''}">
               <div class="slot-mini-left" onclick="toggleAgendaItem('${item.id}')">
                 <span>${item.completed ? '✓' : '○'}</span>
+                ${item.time !== timeStr ? `<span class="slot-mini-time">${item.time}</span>` : ''}
                 <span class="slot-mini-title">${escapeHtml(item.title)}</span>
               </div>
+              <button
+                type="button"
+                class="alarm-toggle-btn ${item.alarmEnabled !== false ? 'alarm-on' : ''}"
+                onclick="toggleAgendaItemAlarm('${item.id}')"
+                title="Alternar alarme"
+              >
+                ${item.alarmEnabled !== false ? '🔔' : '🔕'}
+              </button>
               <button class="icon-btn" type="button" style="width:20px;height:20px;font-size:0.7rem;" onclick="removeAgendaItem('${item.id}')" title="Remover">✕</button>
             </div>
           `).join('');
@@ -929,9 +1164,9 @@ function renderScheduleHabitSelect() {
 function renderAll() {
   syncAgendaWithHabits();
   updateStatusBarClock();
+  updateAlarmPermissionBadge();
   document.getElementById('currentDateDisplay').textContent = `📅 ${formatShortHeaderDate(new Date())}`;
-  renderHomeStart();
-  renderHomeStop();
+  renderHomeHabits();
   renderHomeAgenda();
   renderHomeHours();
   renderScheduleHabitSelect();
@@ -940,15 +1175,6 @@ function renderAll() {
 // ==========================================
 // BOTTOM SHEETS (MODAIS MOBILE)
 // ==========================================
-
-function populateTimeSelects() {
-  const agendaTimeEl = document.getElementById('agendaTime');
-  const habitTimeEl = document.getElementById('habitTime');
-
-  agendaTimeEl.innerHTML = HOURS_RANGE.map(t => `<option value="${t}">${t}</option>`).join('');
-  habitTimeEl.innerHTML = `<option value="">Sem horário fixo</option>` +
-    HOURS_RANGE.map(t => `<option value="${t}">${t}</option>`).join('');
-}
 
 function toLocalDatetimeInputValue(ts = Date.now()) {
   const d = new Date(Number(ts));
@@ -1011,6 +1237,7 @@ function openScheduleModal(prefillTime = null, prefillDateKey = null) {
   document.getElementById('taskTitleGroup').classList.remove('hidden');
   document.getElementById('habitSelectGroup').classList.add('hidden');
   document.getElementById('agendaTaskTitle').value = '';
+  document.getElementById('agendaAlarmEnabled').checked = true;
 
   document.getElementById('scheduleModal').classList.remove('hidden');
   setTimeout(() => document.getElementById('agendaTaskTitle').focus(), 80);
@@ -1028,7 +1255,8 @@ function quickScheduleHabit(habitId) {
     time: habit.suggestedTime,
     type: 'habit',
     habitId: habit.id,
-    title: habit.name
+    title: habit.name,
+    alarmEnabled: true
   });
 }
 
@@ -1051,7 +1279,6 @@ function showToast(message) {
 // ==========================================
 
 document.addEventListener('DOMContentLoaded', () => {
-  populateTimeSelects();
   loadState();
   renderAll();
 
@@ -1059,20 +1286,71 @@ document.addEventListener('DOMContentLoaded', () => {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
 
-  // Navegação Inferior (4 Homes)
+  // Desbloquear Web Audio no primeiro toque do usuário na tela
+  document.body.addEventListener('pointerdown', () => ensureAudioContext(), { once: true });
+
+  // Navegação Inferior (3 Homes Principais: Hábitos | Agenda | Horários)
   document.querySelectorAll('.bottom-nav .nav-item').forEach(btn => {
     btn.addEventListener('click', () => switchScreen(btn.dataset.target));
   });
 
-  // Botão "+ Novo" sempre visível no Header Superior (adapta-se à aba ativa)
+  // Navegação das Sub-Homes dentro da Home Hábitos (Para Começar | Para Deixar)
+  document.querySelectorAll('.subhome-tab').forEach(tab => {
+    tab.addEventListener('click', () => switchSubHome(tab.dataset.subhome));
+  });
+
+  // Botão "+ Novo" no Header Superior (adapta-se à Home e Sub-Home ativas)
   document.getElementById('btnQuickActionTop').addEventListener('click', () => {
-    if (state.activeScreen === 'start') {
-      openNewHabitModal('start');
-    } else if (state.activeScreen === 'stop') {
-      openNewHabitModal('stop');
+    if (state.activeScreen === 'habits') {
+      openNewHabitModal(state.activeSubHome);
     } else {
       openScheduleModal(null, state.selectedDateKey);
     }
+  });
+
+  // Botões de Alarme e Permissão
+  document.getElementById('btnAlarmTogglePermission').addEventListener('click', requestAlarmNotificationPermission);
+  document.getElementById('btnTestAlarm').addEventListener('click', triggerTestAlarm);
+
+  // Ações do Modal de Alarme Tocando
+  document.getElementById('btnAlarmCompleteNow').addEventListener('click', () => {
+    stopAlarmSoundLoop();
+    const item = state.activeRingingItem;
+    state.activeRingingItem = null;
+    document.getElementById('alarmRingingModal').classList.add('hidden');
+
+    if (item && !item.isTestOnly && !item.completed) {
+      toggleAgendaItem(item.id);
+    } else {
+      showToast('✓ Alarme concluído!');
+    }
+  });
+
+  document.getElementById('btnAlarmSnooze').addEventListener('click', () => {
+    stopAlarmSoundLoop();
+    const item = state.activeRingingItem;
+    state.activeRingingItem = null;
+    document.getElementById('alarmRingingModal').classList.add('hidden');
+
+    if (item && !item.isTestOnly) {
+      const target = state.agenda.find(a => a.id === item.id);
+      if (target) {
+        target.time = addMinutesToHHMM(getCurrentTimeHHMM(), 5);
+        target.alarmEnabled = true;
+        saveState();
+        renderAll();
+        showToast(`💤 Soneca ativada! Novo alarme às ${target.time}.`);
+      }
+    } else {
+      showToast('💤 Soneca de teste (+5 min)!');
+    }
+  });
+
+  document.getElementById('btnAlarmDismiss').addEventListener('click', () => {
+    stopAlarmSoundLoop();
+    state.activeRingingItem = null;
+    document.getElementById('alarmRingingModal').classList.add('hidden');
+    showToast('Alarme dispensado.');
   });
 
   // Botões Desktop Preview
@@ -1144,6 +1422,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('habitForm').addEventListener('submit', e => {
     e.preventDefault();
+    ensureAudioContext();
     const id = document.getElementById('habitId').value;
     const name = document.getElementById('habitName').value.trim();
     const category = document.querySelector('input[name="habitCategory"]:checked').value;
@@ -1195,12 +1474,14 @@ document.addEventListener('DOMContentLoaded', () => {
           type: 'habit',
           habitId: newHabit.id,
           title: newHabit.name,
-          completed: false
+          completed: false,
+          alarmEnabled: true
         });
       }
 
       showToast(`Hábito "${name}" criado!`);
-      switchScreen(category === 'stop' ? 'stop' : 'start');
+      switchScreen('habits');
+      switchSubHome(category === 'stop' ? 'stop' : 'start');
     }
 
     saveState();
@@ -1217,18 +1498,35 @@ document.addEventListener('DOMContentLoaded', () => {
       const isHabit = document.querySelector('input[name="agendaItemType"]:checked').value === 'habit';
       document.getElementById('taskTitleGroup').classList.toggle('hidden', isHabit);
       document.getElementById('habitSelectGroup').classList.toggle('hidden', !isHabit);
+
+      if (isHabit) {
+        const selectedHabitId = document.getElementById('agendaHabitId').value;
+        const habit = state.habits.find(h => h.id === selectedHabitId);
+        if (habit && habit.suggestedTime) {
+          document.getElementById('agendaTime').value = habit.suggestedTime;
+        }
+      }
     });
+  });
+
+  document.getElementById('agendaHabitId').addEventListener('change', e => {
+    const habit = state.habits.find(h => h.id === e.target.value);
+    if (habit && habit.suggestedTime) {
+      document.getElementById('agendaTime').value = habit.suggestedTime;
+    }
   });
 
   document.getElementById('scheduleForm').addEventListener('submit', e => {
     e.preventDefault();
+    ensureAudioContext();
     const dateKey = document.getElementById('agendaDateInput').value || state.selectedDateKey;
     const time = document.getElementById('agendaTime').value;
     const type = document.querySelector('input[name="agendaItemType"]:checked').value;
     const title = document.getElementById('agendaTaskTitle').value;
     const habitId = document.getElementById('agendaHabitId').value;
+    const alarmEnabled = document.getElementById('agendaAlarmEnabled').checked;
 
-    const ok = addAgendaItem({ dateKey, time, type, title, habitId });
+    const ok = addAgendaItem({ dateKey, time, type, title, habitId, alarmEnabled });
     if (ok) closeScheduleModal();
   });
 
@@ -1239,7 +1537,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('btnConfirmRelapse').addEventListener('click', confirmRelapseReset);
 
-  // Filtros de Período da Home 4 (Horários)
+  // Filtros de Período da Home 3 (Horários)
   document.querySelectorAll('.period-tabs .period-tab').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.period-tabs .period-tab').forEach(b => b.classList.remove('active'));
@@ -1249,9 +1547,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Atualização em tempo real
+  // Checagem de alarme a cada 1 segundo (precisão de minuto exato)
   setInterval(() => {
     updateStatusBarClock();
-    renderHomeStop();
+    checkScheduledAlarms();
+  }, 1000);
+
+  // Atualizar contadores de abstinência a cada 20 segundos
+  setInterval(() => {
+    renderHomeHabits();
   }, 20000);
 });

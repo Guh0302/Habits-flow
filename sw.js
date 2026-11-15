@@ -1,4 +1,4 @@
-const CACHE_NAME = 'habitflow-mobile-v3';
+const CACHE_NAME = 'habitflow-mobile-v4';
 const ASSETS = [
   './',
   './index.html',
